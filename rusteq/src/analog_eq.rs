@@ -520,7 +520,7 @@ impl AnalogFilter {
             x -= t.cos() * self.coeff.d[n];
             y += t.sin() * self.coeff.d[n];
         }
-        h = h/ (x * x + y * y);
+        h = h / (x * x + y * y);
         h.powf((self.stages as f64 + 1.0 ) / 2.0)
     }
 

@@ -72,7 +72,7 @@
         lv2:portProperty epp:hasStrictBounds ;
         lv2:portProperty epp:logarithmic ;
         lv2:default 100 ;
-        lv2:minimum 0.1 ;
+        lv2:minimum 10 ;
         lv2:maximum 20000 ;
         units:unit units:hz ;
         lv2:scalePoint [
@@ -107,7 +107,7 @@
         lv2:portProperty epp:logarithmic ;
         lv2:default 0.707000 ;
         lv2:minimum 0.100000 ;
-        lv2:maximum 10 ;
+        lv2:maximum 200 ;
         units:unit units:coef ;
     ] , [
 
