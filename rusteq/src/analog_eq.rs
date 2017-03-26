@@ -178,7 +178,7 @@ impl AnalogFilter {
     }
 
     pub fn computefiltercoefs(&mut self) -> () {
-        println!("computefiltercoefs: {:?}", self.filter_type);
+        //println!("computefiltercoefs: {:?}", self.filter_type);
 
         let (coeff, order) = AnalogFilter::compute_coeff(self.filter_type, self.freq, self.q, self.stages,
             self.gain, self.samplerate_f);
@@ -195,7 +195,7 @@ impl AnalogFilter {
         gain: f64,
         fs: f64) -> (Coeff, u32) {
 
-        println!("computefiltercoefs: {:?}", ftype);
+        //println!("computefiltercoefs: {:?}", ftype);
 
         let mut coeff = Coeff { c: [0.0; 3], d: [0.0; 3] };
         let mut zerocoefs = false;
@@ -260,8 +260,6 @@ impl AnalogFilter {
                 coeff.d[1] = tmp;
                 coeff.d[2] = 0.0;
                 order = 1;
-
-                println!("LPF1 coeffs: {:?}", coeff);
             }
             FilterType::HPF1 => {
                 if !zerocoefs {
@@ -275,9 +273,6 @@ impl AnalogFilter {
                 coeff.d[1] = tmp;
                 coeff.d[2] = 0.0;
                 order = 1;
-
-                println!("HPF1 coeffs: {:?}", coeff);
-                
             }
             FilterType::LPF2 => {
                 if !zerocoefs {
@@ -293,8 +288,6 @@ impl AnalogFilter {
                     // other coeffs are zero initalised                        
                 }
                 order = 2;
-
-                println!("LPF2 coeffs: {:?}", coeff);
             }
             FilterType::HPF2 => {
                 if !zerocoefs {
@@ -534,11 +527,7 @@ impl AnalogFilter {
 
     pub fn set_values(&mut self, ftype: f32, freq: f32, q: f32, stages: f32, gain: f64) -> () {
         
-        println!("set_values: {:?}", self);
-
         let typ = FilterType::from_u32(ftype as u32);
-
-    
 
         self.q = q as f64;
         self.filter_type = typ;
@@ -570,12 +559,7 @@ impl AnalogFilter {
         self.freq = frequency;
         self.first_time = false;
         
-        println!("Before compute: {:?}", self);
-
         self.computefiltercoefs();
-
-        println!("After compute: {:?}", self);
-
     }
 
 }

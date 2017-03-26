@@ -75,6 +75,26 @@
         lv2:minimum 0.1 ;
         lv2:maximum 20000 ;
         units:unit units:hz ;
+        lv2:scalePoint [
+            rdfs:label "20" ;
+            rdf:value 20
+        ] , [
+            rdfs:label "100" ;
+            rdf:value 100
+        ] , [
+            rdfs:label "500" ;
+            rdf:value 500
+        ] , [
+            rdfs:label "1000" ;
+            rdf:value 1000
+        ] , [
+            rdfs:label "10000" ;
+            rdf:value 10000
+        ] , [
+            rdfs:label "20000" ;
+            rdf:value 20000
+        ]
+        
     ] , [
 
         a lv2:InputPort ,
