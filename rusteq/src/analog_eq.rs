@@ -478,7 +478,12 @@ impl AnalogFilter {
         }
 
         if self.needs_interpolation {
-            let mut ismp = vec![0.0; output.len()];
+            // 8192 is the biggest buffer size used for jack. We should be on 
+            // the safe side here (cross the fingers), but now we don't have 
+            // to allocate in the realtime thread (which is a big no-no)
+            const BUF_SIZE: usize = 8192;
+            let mut ismp_buf = [0.0; BUF_SIZE];
+            let ismp = &mut ismp_buf[0..output.len()];
 
             for i in 0..(self.stages + 1) {
                 AnalogFilter::singlefilterout(input, &mut ismp[..], &mut self.old_history[i as usize],

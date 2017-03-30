@@ -1,0 +1,16 @@
+[package]
+name = "lv2Plugins"
+version = "0.1.0"
+authors = ["Michael Oswald <michael.oswald@onikudaki.net>"]
+
+[dependencies]
+libc = "0.2.21"
+num = "0.1.37"
+
+[dependencies.lv2_raw]
+path = "../../lv2_raw"
+
+[lib]
+name = "rusteq"
+crate-type = ["dylib"] # ?
+

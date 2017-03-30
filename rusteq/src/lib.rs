@@ -183,6 +183,8 @@ impl Descriptor {
         let ref mut filter_l = eq.filter_l;
         let ref mut filter_r = eq.filter_r;
 
+        // compare actual control port values with cached values. If something
+        // has changed, we need to recalculate the coeffcients
         if ftype != eq.ftype_c || freq != eq.freq_c || q != eq.q_c 
             || stages != eq.stages_c || gain != eq.gain_c {
 
@@ -237,6 +239,8 @@ impl Descriptor {
                 1.0,
                 1,
                 rate))) };
+
+            
 
             return ptr as LV2Handle;
     }
