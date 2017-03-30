@@ -110,6 +110,22 @@ impl MidiGate {
             program: 0
         }
     }
+
+    fn write_output(&mut self, offset: isize, len: usize) -> () {
+        let active = if self.program == 0 { self.n_active_notes > 0 } 
+                        else { self.n_active_notes == 0 };
+
+        let input = unsafe { std::slice::from_raw_parts(self.input.offset(offset), len) };
+        let output = unsafe { std::slice::from_raw_parts_mut(self.output.offset(offset), len) };
+
+        if active {
+            output.copy_from_slice(input);
+        } else {
+            for out in output {
+                *out = 0.0;
+            }
+        }
+    }
 }
 
 
@@ -130,11 +146,33 @@ struct Descriptor(LV2Descriptor);
 
 
 impl Descriptor {
-    pub extern "C" fn activate(_handle: LV2Handle) {}
+    pub extern "C" fn activate(_handle: LV2Handle) {
+        let mut gate = unsafe { &mut *(_handle as *mut MidiGate) };
+
+        gate.n_active_notes = 0;
+        gate.program = 0;
+    }
+
+
     pub extern "C" fn deactivate(_handle: LV2Handle) {}
 
 
-    pub extern "C" fn run(handle: LV2Handle, n_seqlen: u32) {
+    pub extern "C" fn run(_handle: LV2Handle, n_seqlen: u32) {
+        let mut gate = unsafe { &mut *(_handle as *mut MidiGate) };
+        let mut offset = 0;
+
+        unsafe {
+            let f = |it: *const Lv2AtomEvent| { 
+                    if (*it).body.mytype == gate.midi_event {
+                        let msg = it.offset(1) as *const u8;
+                        
+                    }
+                };
+
+            lv2_atom_sequence_foreach(gate.control, f);
+        
+        }
+
         /*let _eq = handle as *mut EQ;
 
         let mut eq = unsafe { &mut *_eq };
@@ -177,23 +215,17 @@ impl Descriptor {
         port: u32,
         data : *mut c_void)
     {
-        /*let mut eq = unsafe { &mut *(instance as *mut EQ) };
+        let mut gate = unsafe { &mut *(instance as *mut MidiGate) };
         let p = PortIndex::from_u32(port);
 
         println!("connect_port: {}", port);
 
         match p {
-            Some(PortIndex::EQInputL) => eq.input_l = data as *const f32,
-            Some(PortIndex::EQInputR) => eq.input_r = data as *const f32 ,
-            Some(PortIndex::EQOutputL) => eq.output_l = data as *mut f32 ,
-            Some(PortIndex::EQOutputR) => eq.output_r = data as *mut f32 ,
-            Some(PortIndex::EQType) => eq.ftype = data as *const f32,
-            Some(PortIndex::EQFreq) => eq.freq = data as *const f32,
-            Some(PortIndex::EQQ) => eq.q = data as *const f32,
-            Some(PortIndex::EQStages) => eq.stages = data as *const f32,
-            Some(PortIndex::EQGain) => eq.gain = data as *const f32,
+            Some(PortIndex::MGControl) => gate.control = data as *const LV2_Atom_Sequence,
+            Some(PortIndex::MGIn) => gate.input = data as *const f32 ,
+            Some(PortIndex::MGOut) => gate.output = data as *mut f32 ,
             None => println!("Not a valid port index: {}", port)
-        }*/
+        }
     }
 
 
