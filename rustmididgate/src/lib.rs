@@ -84,7 +84,7 @@ impl PortIndex {
 #[repr(C)]
 struct MidiGate {
     // Port buffers
-    control: *const LV2_Atom_Sequence,
+    control: *mut LV2_Atom_Sequence,
     input: *const f32,
     output: *mut f32,
 
@@ -99,7 +99,7 @@ struct MidiGate {
 impl MidiGate {
     fn new(m: *const LV2UridMap, event: &LV2Urid) -> MidiGate {
         MidiGate { 
-            control: (0 as *const LV2_Atom_Sequence),
+            control: (0 as *mut LV2_Atom_Sequence),
             input: (0 as *const f32),   
             output: (0 as *mut f32),
 
@@ -157,57 +157,41 @@ impl Descriptor {
     pub extern "C" fn deactivate(_handle: LV2Handle) {}
 
 
-    pub extern "C" fn run(_handle: LV2Handle, n_seqlen: u32) {
-        let mut gate = unsafe { &mut *(_handle as *mut MidiGate) };
+    pub extern "C" fn run(_handle: LV2Handle, sample_count: u32) {
+        let gate = unsafe { &mut *(_handle as *mut MidiGate) };
         let mut offset = 0;
 
         unsafe {
             let f = |it: *const Lv2AtomEvent| { 
-                    if (*it).body.mytype == gate.midi_event {
-                        let msg = it.offset(1) as *const u8;
-                        
-                    }
-                };
+                        if (*it).body.mytype == gate.midi_event {
+                            let msg_raw = it.offset(1) as *const u8;
+                            let msg = std::slice::from_raw_parts(msg_raw, (*it).body.size as usize);
+                            match lv2_midi_message_type(msg) {
+                                LV2_Midi_Message_Type::LV2_MIDI_MSG_NOTE_ON => { 
+                                        gate.n_active_notes += 1;
+                                        println!("NOTE_ON");
+                                    },
+                                LV2_Midi_Message_Type::LV2_MIDI_MSG_NOTE_OFF => {
+                                        gate.n_active_notes -= 1;
+                                        println!("NOTE_OFF");
+                                    },
+                                LV2_Midi_Message_Type::LV2_MIDI_MSG_PGM_CHANGE => {
+                                        println!("PGM_CHG");
+                                        if (msg[1] == 0) || (msg[1] == 1) { gate.program = msg[1] as u32; }
+                                    },
+                                _ => return
+                            }   
+                        }
 
-            lv2_atom_sequence_foreach(gate.control, f);
-        
+                        let frames = (*it).time_as_frames();
+                        gate.write_output(offset, frames as usize - offset as usize);
+                        offset = frames as isize;
+                    };
+
+            let ref mut control = *gate.control;
+            control.foreach(f);
         }
-
-        /*let _eq = handle as *mut EQ;
-
-        let mut eq = unsafe { &mut *_eq };
-
-        let n = n_seqlen as usize;
-
-        let input_l = unsafe { std::slice::from_raw_parts(eq.input_l, n) };
-        let input_r = unsafe { std::slice::from_raw_parts(eq.input_r, n) };
-        let output_l = unsafe { std::slice::from_raw_parts_mut(eq.output_l, n) };
-        let output_r = unsafe { std::slice::from_raw_parts_mut(eq.output_r, n) };
-        let ftype = unsafe { *eq.ftype }; 
-        let freq = unsafe { *eq.freq };
-        let q = unsafe { *eq.q };
-        let stages = unsafe { *eq.stages };
-        let gain = unsafe { *eq.gain };
-        let ref mut filter_l = eq.filter_l;
-        let ref mut filter_r = eq.filter_r;
-
-        // compare actual control port values with cached values. If something
-        // has changed, we need to recalculate the coeffcients
-        if ftype != eq.ftype_c || freq != eq.freq_c || q != eq.q_c 
-            || stages != eq.stages_c || gain != eq.gain_c {
-
-            eq.ftype_c = ftype;
-            eq.freq_c = freq;
-            eq.q_c = q;
-            eq.stages_c = stages;
-            eq.gain_c = gain;
-
-            filter_l.set_values(ftype, freq, q, stages, db_co(gain));
-            filter_r.set_values(ftype, freq, q, stages, db_co(gain));
-        }
-
-        filter_l.filterout(input_l, output_l);
-        filter_r.filterout(input_r, output_r);*/
+        gate.write_output(offset, sample_count as usize - offset as usize);
     }            
 
 
@@ -221,7 +205,7 @@ impl Descriptor {
         println!("connect_port: {}", port);
 
         match p {
-            Some(PortIndex::MGControl) => gate.control = data as *const LV2_Atom_Sequence,
+            Some(PortIndex::MGControl) => gate.control = data as *mut LV2_Atom_Sequence,
             Some(PortIndex::MGIn) => gate.input = data as *const f32 ,
             Some(PortIndex::MGOut) => gate.output = data as *mut f32 ,
             None => println!("Not a valid port index: {}", port)
@@ -249,6 +233,9 @@ impl Descriptor {
 
                     if f == LV2_URID__MAP {
                         map = (*feature).data as *const LV2UridMap;
+
+                        println!("Found map: {}", f);
+
                         break;
                     }
 
@@ -261,6 +248,8 @@ impl Descriptor {
                 } else {
                     let f = (*map).map;
                     let ev = f((*map).handle, LV2_MIDI__MIDIEVENT.as_ptr() as *const c_char);
+
+                    println!("map is: {}", ev);
 
                     ptr = transmute(Box::new(MidiGate::new(map, &ev)));
                 }
