@@ -42,7 +42,7 @@ use std::f64;
 use std::mem::*;
 use libc::{c_char, c_void};
 use std::ffi::*;
-
+use std::f64::consts::PI;
 
 /*
    The URI is the identifier for a plugin, and how the host associates this
@@ -51,29 +51,66 @@ use std::ffi::*;
    file is a good convention to follow.  If this URI does not match that used
    in the data files, the host will fail to load the plugin.
 */
-static MIDIGATE_URI: &'static [u8] = b"http://example.org/rustmidigate\0";
+static MIDIGATE_URI: &'static [u8] = b"http://example.org/rustmetro\0";
 
 /*
    In code, ports are referred to by index.  An enumeration of port indices
    should be defined for readability.
 */
+
+struct MetroURIs {
+    atom_blank: LV2Urid, 
+    atom_float: LV2Urid,
+    atom_object: LV2Urid,
+    atom_path: LV2Urid,
+    atom_resource: LV2Urid,
+    atom_sequence: LV2Urid,
+    atom_position: LV2Urid,
+    atom_bar_beat: LV2Urid,
+    atom_bears_per_minute: LV2Urid,
+    atom_speed: LV2Urid
+}
+
+impl MetroURIs {
+    pub fn new() -> MetroURIs {
+        MetroURIs {
+            atom_blank: 0,
+            atom_float: 0,
+            atom_object: 0,
+            atom_path: 0,
+            atom_resource: 0,
+            atom_sequence: 0,
+            atom_position: 0,
+            atom_bar_beat: 0,
+            atom_bears_per_minute: 0,
+            atom_speed: 0
+        }
+    }
+}
+
+
 enum PortIndex {
-    MGControl  = 0,
-    MGIn  = 1,
-    MGOut = 2
+    MetroControl  = 0,
+    MetroOut = 1
 }
 
 impl PortIndex {
 
     fn from_u32(x: u32) -> Option<PortIndex> {
         match x {
-            0 => Some(PortIndex::MGControl),
-            1 => Some(PortIndex::MGIn),
-            2 => Some(PortIndex::MGOut),
+            0 => Some(PortIndex::MetroControl),
+            1 => Some(PortIndex::MetroOut),
             _ => None
         }
     }
 }
+
+enum State {
+    StateAttack,
+    StateDecay,
+    StateOff
+}
+
 
 /*
    Every plugin defines a private structure for the plugin instance.  All data
@@ -81,50 +118,117 @@ impl PortIndex {
    every instance method.  In this simple plugin, only port buffers need to be
    stored, since there is no additional instance data.
 */
+
 #[repr(C)]
-struct MidiGate {
-    // Port buffers
+struct Ports {
     control: *mut LV2_Atom_Sequence,
-    input: *const f32,
-    output: *mut f32,
-
-    map: *const LV2UridMap,
-
-    midi_event: LV2Urid,
-
-    n_active_notes: u32,
-    program: u32,
+    output: *mut f32
 }
 
-impl MidiGate {
-    fn new(m: *const LV2UridMap, event: &LV2Urid) -> MidiGate {
-        MidiGate { 
-            control: (0 as *mut LV2_Atom_Sequence),
-            input: (0 as *const f32),   
-            output: (0 as *mut f32),
 
+#[repr(C)]
+struct Metro {
+    map: *const LV2UridMap,
+    uris: MetroURIs,
+
+    ports: Ports,
+    
+    rate: f64,
+    bpm: f64,
+    speed: f64,
+
+    elapsed_len: u32,
+
+    state: State,
+
+    wave: Vec<f32>,
+    wave_offset: usize,
+
+    attack_len: u32,
+    decay_len: u32
+}
+
+
+
+impl Metro {
+    fn new(m: *const LV2UridMap, 
+           u: MetroURIs, 
+           rate: f64, 
+           bpm: f64,
+           wav: Vec<f32>) -> Metro {
+        Metro { 
             map: m,
 
-            midi_event: *event,
-            n_active_notes: 0,
-            program: 0
+            uris: u,
+
+            ports: Ports {
+                control: (0 as *mut LV2_Atom_Sequence),
+                output: (0 as *mut f32) },
+
+            rate: rate,
+            bpm: bpm,
+            speed: 0.0,
+
+            elapsed_len: 0,
+            wave_offset: 0,
+
+            state: State::StateOff,
+
+            wave: wav,
+
+            attack_len: (rate * 0.005) as u32,
+            decay_len: (rate * 0.075) as u32
         }
     }
 
-    fn write_output(&mut self, offset: isize, len: usize) -> () {
-        let active = if self.program == 0 { self.n_active_notes > 0 } 
-                        else { self.n_active_notes == 0 };
+    pub fn play(&mut self, begin: u32, end: u32) -> () {
+        let frames_per_beat = (60.0 / self.bpm * self.rate) as u32;
 
-        let input = unsafe { std::slice::from_raw_parts(self.input.offset(offset), len) };
-        let output = unsafe { std::slice::from_raw_parts_mut(self.output.offset(offset), len) };
+        let mut out = unsafe { std::slice::from_raw_parts_mut(self.ports.output.offset(begin as isize), 
+                        (end - begin) as usize) };
 
-        if active {
-            output.copy_from_slice(input);
-        } else {
-            for out in output {
-                *out = 0.0;
+        if self.speed == 0.0 {
+            for it in &mut out[..] {
+                *it = 0.0;
+                return;
             }
         }
+
+        for it in &mut out[..] {
+            match self.state {
+                State::StateAttack => {
+                    *it = self.wave[self.wave_offset] * (self.elapsed_len as f32) 
+                            / (self.attack_len as f32);
+                    if self.elapsed_len >= self.attack_len {
+                        self.state = State::StateDecay;
+                    }
+                },
+                State::StateDecay => {
+                    let d = (self.elapsed_len as f32 - self.attack_len as f32) 
+                            / self.decay_len as f32;
+                    *it = self.wave[self.wave_offset] * (1.0 - d);
+                    if self.elapsed_len >= (self.attack_len + self.decay_len) {
+                        self.state = State::StateOff;
+                    }
+                },
+                State::StateOff => *it = 0.0,
+            }
+
+            self.wave_offset = (self.wave_offset + 1) % self.wave.len();
+
+            self.elapsed_len += 1;
+            if self.elapsed_len == frames_per_beat {
+                self.state = State::StateAttack;
+                self.elapsed_len = 0;
+            }
+        }
+    }
+
+
+    pub fn update_position(&mut self, obj: *const LV2_Atom_Object) -> () {
+        let uris = &self.uris;
+
+        
     }
 }
 
@@ -147,10 +251,11 @@ struct Descriptor(LV2Descriptor);
 
 impl Descriptor {
     pub extern "C" fn activate(_handle: LV2Handle) {
-        let mut gate = unsafe { &mut *(_handle as *mut MidiGate) };
+        let mut metro = unsafe { &mut *(_handle as *mut Metro) };
 
-        gate.n_active_notes = 0;
-        gate.program = 0;
+        metro.elapsed_len = 0;
+        metro.wave_offset = 0;
+        metro.state = State::StateOff;
     }
 
 
@@ -158,7 +263,7 @@ impl Descriptor {
 
 
     pub extern "C" fn run(_handle: LV2Handle, sample_count: u32) {
-        let gate = unsafe { &mut *(_handle as *mut MidiGate) };
+        /*let gate = unsafe { &mut *(_handle as *mut MidiGate) };
         let mut offset = 0;
 
         unsafe {
@@ -191,7 +296,7 @@ impl Descriptor {
             let ref mut control = *gate.control;
             control.foreach(f);
         }
-        gate.write_output(offset, sample_count as usize - offset as usize);
+        gate.write_output(offset, sample_count as usize - offset as usize);*/
     }            
 
 
@@ -199,18 +304,18 @@ impl Descriptor {
         port: u32,
         data : *mut c_void)
     {
-        let mut gate = unsafe { &mut *(instance as *mut MidiGate) };
+        let mut metro = unsafe { &mut *(instance as *mut Metro) };
         let p = PortIndex::from_u32(port);
 
         println!("connect_port: {}", port);
 
         match p {
-            Some(PortIndex::MGControl) => gate.control = data as *mut LV2_Atom_Sequence,
-            Some(PortIndex::MGIn) => gate.input = data as *const f32 ,
-            Some(PortIndex::MGOut) => gate.output = data as *mut f32 ,
+            Some(PortIndex::MetroControl) => metro.ports.control = data as *mut LV2_Atom_Sequence,
+            Some(PortIndex::MetroOut) => metro.ports.output = data as *mut f32 ,
             None => println!("Not a valid port index: {}", port)
         }
     }
+
 
 
     pub extern "C" fn instantiate(_desc: *const LV2Descriptor,
@@ -218,7 +323,7 @@ impl Descriptor {
         _bundle_path: *const c_char,
         _features: *const *const LV2Feature) -> LV2Handle {
 
-            let ptr: *mut MidiGate;
+            let ptr: *mut Metro;
 
             unsafe {
                 let mut map = 0 as *const LV2UridMap;
@@ -238,11 +343,41 @@ impl Descriptor {
                 }
 
                 if map.is_null() {
-                    ptr = 0 as *mut MidiGate;
+                    ptr = 0 as *mut Metro;
                 } else {
                     let f = (*map).map;
-                    let ev = f((*map).handle, LV2_MIDI__MIDIEVENT.as_ptr() as *const c_char);
-                    ptr = transmute(Box::new(MidiGate::new(map, &ev)));
+
+                    let uris = MetroURIs {
+                            atom_blank: f((*map).handle, LV2_ATOM__BLANK.as_ptr() as *const c_char),
+                            atom_float: f((*map).handle, LV2_ATOM__FLOAT.as_ptr() as *const c_char),
+                            atom_object: f((*map).handle, LV2_ATOM__OBJECT.as_ptr() as *const c_char),
+                            atom_path: f((*map).handle, LV2_ATOM__PATH.as_ptr() as *const c_char),
+                            atom_resource: f((*map).handle, LV2_ATOM__RESOURCE.as_ptr() as *const c_char),
+                            atom_sequence: f((*map).handle, LV2_ATOM__SEQUENCE.as_ptr() as *const c_char),
+                            atom_position: f((*map).handle, LV2_TIME__POSITION.as_ptr() as *const c_char),
+                            atom_bar_beat: f((*map).handle, LV2_TIME__BARBEAT.as_ptr() as *const c_char),
+                            atom_bears_per_minute: f((*map).handle, LV2_TIME__BEATSPERMINUTE.as_ptr() as *const c_char),
+                            atom_speed: f((*map).handle, LV2_TIME__SPEED.as_ptr() as *const c_char)
+                        };
+
+                    let freq = 440.0 * 2.0;
+                    let amp = 0.5;
+
+                    let mut data = Vec::new();
+                    data.set_len((_rate / freq) as usize);
+
+                    let mut i = 0;
+                    for it in &mut data {
+                        *it = (((i as f64) * 2.0 * PI * freq / _rate).sin() * amp) as f32;
+                        i += 1;
+                    }
+
+                    ptr = transmute(Box::new(Metro::new(map, 
+                                uris, 
+                                _rate, 
+                                120.0,
+                                data
+                                )));
                 }
 
             }
@@ -252,7 +387,7 @@ impl Descriptor {
 
     pub extern "C" fn cleanup(handle: LV2Handle) {
         unsafe { 
-            let _drop: Box<MidiGate> = transmute(((handle as *mut MidiGate)));
+            let _drop: Box<Metro> = transmute(((handle as *mut Metro)));
         }
     }
 
