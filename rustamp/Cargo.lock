@@ -1,5 +1,5 @@
 [root]
-name = "lv2Plugins"
+name = "lv2plugins"
 version = "0.1.0"
 dependencies = [
  "libc 0.2.21 (registry+https://github.com/rust-lang/crates.io-index)",

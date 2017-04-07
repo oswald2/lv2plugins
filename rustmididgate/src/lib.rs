@@ -84,7 +84,7 @@ impl PortIndex {
 #[repr(C)]
 struct MidiGate {
     // Port buffers
-    control: *mut LV2_Atom_Sequence,
+    control: *mut LV2AtomSequence,
     input: *const f32,
     output: *mut f32,
 
@@ -99,7 +99,7 @@ struct MidiGate {
 impl MidiGate {
     fn new(m: *const LV2UridMap, event: &LV2Urid) -> MidiGate {
         MidiGate { 
-            control: (0 as *mut LV2_Atom_Sequence),
+            control: (0 as *mut LV2AtomSequence),
             input: (0 as *const f32),   
             output: (0 as *mut f32),
 
@@ -162,20 +162,20 @@ impl Descriptor {
         let mut offset = 0;
 
         unsafe {
-            let f = |it: *const Lv2AtomEvent| { 
+            let f = |it: *const LV2AtomEvent| { 
                         if (*it).body.mytype == gate.midi_event {
                             let msg_raw = it.offset(1) as *const u8;
                             let msg = std::slice::from_raw_parts(msg_raw, (*it).body.size as usize);
                             match lv2_midi_message_type(msg) {
-                                LV2_Midi_Message_Type::LV2_MIDI_MSG_NOTE_ON => { 
+                                LV2MidiMessageType::LV2MidiMsgNoteOn => { 
                                         gate.n_active_notes += 1;
                                         println!("NOTE_ON");
                                     },
-                                LV2_Midi_Message_Type::LV2_MIDI_MSG_NOTE_OFF => {
+                                LV2MidiMessageType::LV2MidiMsgNoteOff => {
                                         gate.n_active_notes -= 1;
                                         println!("NOTE_OFF");
                                     },
-                                LV2_Midi_Message_Type::LV2_MIDI_MSG_PGM_CHANGE => {
+                                LV2MidiMessageType::LV2MidiMsgPgmChange => {
                                         println!("PGM_CHG");
                                         if (msg[1] == 0) || (msg[1] == 1) { gate.program = msg[1] as u32; }
                                     },
@@ -205,7 +205,7 @@ impl Descriptor {
         println!("connect_port: {}", port);
 
         match p {
-            Some(PortIndex::MGControl) => gate.control = data as *mut LV2_Atom_Sequence,
+            Some(PortIndex::MGControl) => gate.control = data as *mut LV2AtomSequence,
             Some(PortIndex::MGIn) => gate.input = data as *const f32 ,
             Some(PortIndex::MGOut) => gate.output = data as *mut f32 ,
             None => println!("Not a valid port index: {}", port)

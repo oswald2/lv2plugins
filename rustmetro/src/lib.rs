@@ -65,10 +65,10 @@ struct MetroURIs {
     atom_path: LV2Urid,
     atom_resource: LV2Urid,
     atom_sequence: LV2Urid,
-    atom_position: LV2Urid,
-    atom_bar_beat: LV2Urid,
-    atom_bears_per_minute: LV2Urid,
-    atom_speed: LV2Urid
+    time_position: LV2Urid,
+    time_bar_beat: LV2Urid,
+    time_beats_per_minute: LV2Urid,
+    time_speed: LV2Urid
 }
 
 impl MetroURIs {
@@ -80,10 +80,10 @@ impl MetroURIs {
             atom_path: 0,
             atom_resource: 0,
             atom_sequence: 0,
-            atom_position: 0,
-            atom_bar_beat: 0,
-            atom_bears_per_minute: 0,
-            atom_speed: 0
+            time_position: 0,
+            time_bar_beat: 0,
+            time_beats_per_minute: 0,
+            time_speed: 0
         }
     }
 }
@@ -121,7 +121,7 @@ enum State {
 
 #[repr(C)]
 struct Ports {
-    control: *mut LV2_Atom_Sequence,
+    control: *mut LV2AtomSequence,
     output: *mut f32
 }
 
@@ -162,7 +162,7 @@ impl Metro {
             uris: u,
 
             ports: Ports {
-                control: (0 as *mut LV2_Atom_Sequence),
+                control: (0 as *mut LV2AtomSequence),
                 output: (0 as *mut f32) },
 
             rate: rate,
@@ -225,10 +225,45 @@ impl Metro {
     }
 
 
-    pub fn update_position(&mut self, obj: *const LV2_Atom_Object) -> () {
+    pub fn update_position(&mut self, obj: *mut LV2AtomObject) -> () {
         let uris = &self.uris;
 
-        
+
+        let mut beat: *mut LV2Atom = 0 as *mut LV2Atom;
+        let mut bpm: *mut LV2Atom = 0 as *mut LV2Atom;
+        let mut speed: *mut LV2Atom = 0 as *mut LV2Atom;
+
+        let descr = [ObjectHelper{key: uris.time_bar_beat, atom: &mut beat},
+            ObjectHelper{key: uris.time_beats_per_minute, atom: &mut bpm},
+            ObjectHelper{key: uris.time_speed, atom: &mut speed}];
+
+        unsafe { 
+            
+            lv2_atom_object_get(obj, &descr[..]);
+
+            if !bpm.is_null() && (*bpm).mytype == uris.atom_float {
+                self.bpm = (*(bpm as *const LV2AtomFloat)).body as f64;
+            }
+            if !speed.is_null() && (*speed).mytype == uris.atom_float {
+                self.speed = (*(speed as *const LV2AtomFloat)).body as f64;
+            }
+            if !beat.is_null() && (*beat).mytype == uris.atom_float {
+                let frames_per_beat = 60.0 / self.bpm * self.rate;
+                let bar_beats = (*(beat as *const LV2AtomFloat)).body as f64;
+                let beat_beats = bar_beats - bar_beats.floor();
+
+                self.elapsed_len = (beat_beats * frames_per_beat) as u32;
+
+                if self.elapsed_len < self.attack_len {
+                    self.state = State::StateAttack;
+                } else if self.elapsed_len < (self.attack_len + self.decay_len) {
+                    self.state = State::StateDecay;
+                } else {
+                    self.state = State::StateOff;
+                }
+
+            }
+        }
     }
 }
 
@@ -263,40 +298,37 @@ impl Descriptor {
 
 
     pub extern "C" fn run(_handle: LV2Handle, sample_count: u32) {
-        /*let gate = unsafe { &mut *(_handle as *mut MidiGate) };
-        let mut offset = 0;
+        let metro = unsafe { &mut *(_handle as *mut Metro) };
+
+        let inp = metro.ports.control;
+        let mut last_t = 0;
 
         unsafe {
-            let f = |it: *const Lv2AtomEvent| { 
-                        if (*it).body.mytype == gate.midi_event {
-                            let msg_raw = it.offset(1) as *const u8;
-                            let msg = std::slice::from_raw_parts(msg_raw, (*it).body.size as usize);
-                            match lv2_midi_message_type(msg) {
-                                LV2_Midi_Message_Type::LV2_MIDI_MSG_NOTE_ON => { 
-                                        gate.n_active_notes += 1;
-                                        println!("NOTE_ON");
-                                    },
-                                LV2_Midi_Message_Type::LV2_MIDI_MSG_NOTE_OFF => {
-                                        gate.n_active_notes -= 1;
-                                        println!("NOTE_OFF");
-                                    },
-                                LV2_Midi_Message_Type::LV2_MIDI_MSG_PGM_CHANGE => {
-                                        println!("PGM_CHG");
-                                        if (msg[1] == 0) || (msg[1] == 1) { gate.program = msg[1] as u32; }
-                                    },
-                                _ => return
-                            }   
-                        }
+        
+            let mut ev = lv2_atom_sequence_begin(&(*inp).body);
 
-                        let frames = (*it).time_as_frames();
-                        gate.write_output(offset, frames as usize - offset as usize);
-                        offset = frames as isize;
-                    };
+            while !lv2_atom_sequence_is_end(&(*inp).body, (*inp).atom.size, ev) {
 
-            let ref mut control = *gate.control;
-            control.foreach(f);
+
+                metro.play(last_t, (*ev).time_as_frames() as u32);
+
+                if ((*ev).body.mytype == metro.uris.atom_object) ||
+                    ((*ev).body.mytype == metro.uris.atom_blank) {
+
+                    let addr: *mut LV2Atom = &mut ((*ev).body);
+                    let obj = addr as *mut LV2AtomObject;
+
+                    if (*obj).body.otype == metro.uris.time_position {
+                        metro.update_position(obj);
+                    }
+                }
+                last_t = (*ev).time_as_frames() as u32;
+
+                ev = lv2_atom_sequence_next(ev);
+            }
         }
-        gate.write_output(offset, sample_count as usize - offset as usize);*/
+
+        metro.play(last_t, sample_count);
     }            
 
 
@@ -310,7 +342,7 @@ impl Descriptor {
         println!("connect_port: {}", port);
 
         match p {
-            Some(PortIndex::MetroControl) => metro.ports.control = data as *mut LV2_Atom_Sequence,
+            Some(PortIndex::MetroControl) => metro.ports.control = data as *mut LV2AtomSequence,
             Some(PortIndex::MetroOut) => metro.ports.output = data as *mut f32 ,
             None => println!("Not a valid port index: {}", port)
         }
@@ -354,10 +386,10 @@ impl Descriptor {
                             atom_path: f((*map).handle, LV2_ATOM__PATH.as_ptr() as *const c_char),
                             atom_resource: f((*map).handle, LV2_ATOM__RESOURCE.as_ptr() as *const c_char),
                             atom_sequence: f((*map).handle, LV2_ATOM__SEQUENCE.as_ptr() as *const c_char),
-                            atom_position: f((*map).handle, LV2_TIME__POSITION.as_ptr() as *const c_char),
-                            atom_bar_beat: f((*map).handle, LV2_TIME__BARBEAT.as_ptr() as *const c_char),
-                            atom_bears_per_minute: f((*map).handle, LV2_TIME__BEATSPERMINUTE.as_ptr() as *const c_char),
-                            atom_speed: f((*map).handle, LV2_TIME__SPEED.as_ptr() as *const c_char)
+                            time_position: f((*map).handle, LV2_TIME__POSITION.as_ptr() as *const c_char),
+                            time_bar_beat: f((*map).handle, LV2_TIME__BARBEAT.as_ptr() as *const c_char),
+                            time_beats_per_minute: f((*map).handle, LV2_TIME__BEATSPERMINUTE.as_ptr() as *const c_char),
+                            time_speed: f((*map).handle, LV2_TIME__SPEED.as_ptr() as *const c_char)
                         };
 
                     let freq = 440.0 * 2.0;
