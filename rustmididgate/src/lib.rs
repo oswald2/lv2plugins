@@ -168,7 +168,7 @@ impl Descriptor {
         // version using iterator and a for loop:
         unsafe {
 
-            let iterator = LV2AtomSequenceIterator::new(gate.control);
+            let iterator = LV2AtomSequenceIterator::new(& *gate.control);
 
             for x in iterator {
                 if (*x).body.mytype == midi_event {
