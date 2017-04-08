@@ -158,9 +158,48 @@ impl Descriptor {
 
 
     pub extern "C" fn run(_handle: LV2Handle, sample_count: u32) {
-        let gate = unsafe { &mut *(_handle as *mut MidiGate) };
+        let mut gate = unsafe { &mut *(_handle as *mut MidiGate) };
         let mut offset = 0;
 
+        // need this, will create a copy so we have no borrows on gate
+        let midi_event = gate.midi_event;
+
+        unsafe {
+
+            let ref mut control = *gate.control;
+            
+            let it = LV2AtomSequenceIterator::new(control);
+
+            let f = |_, x: *const LV2AtomEvent| -> () {
+                    if (*x).body.mytype == midi_event {
+                        let msg = (*x).data();
+                        match lv2_midi_message_type(msg) {
+                            LV2MidiMessageType::LV2MidiMsgNoteOn => { 
+                                    gate.n_active_notes += 1;
+                                },
+                            LV2MidiMessageType::LV2MidiMsgNoteOff => {
+                                    gate.n_active_notes -= 1;
+                                },
+                            LV2MidiMessageType::LV2MidiMsgPgmChange => {
+                                    if (msg[1] == 0) || (msg[1] == 1) { 
+                                        gate.program = msg[1] as u32; 
+                                    }
+                                },
+                            _ => return
+                        }
+                    }
+                    let frames = (*x).time_as_frames();
+                    gate.write_output(offset, frames as usize - offset as usize);
+                    offset = frames as isize;
+                    
+                };
+
+            it.fold((), f);
+        }
+
+        gate.write_output(offset, sample_count as usize - offset as usize);
+
+        /*
         unsafe {
             let f = |it: *const LV2AtomEvent| { 
                         if (*it).body.mytype == gate.midi_event {
@@ -169,14 +208,11 @@ impl Descriptor {
                             match lv2_midi_message_type(msg) {
                                 LV2MidiMessageType::LV2MidiMsgNoteOn => { 
                                         gate.n_active_notes += 1;
-                                        println!("NOTE_ON");
                                     },
                                 LV2MidiMessageType::LV2MidiMsgNoteOff => {
                                         gate.n_active_notes -= 1;
-                                        println!("NOTE_OFF");
                                     },
                                 LV2MidiMessageType::LV2MidiMsgPgmChange => {
-                                        println!("PGM_CHG");
                                         if (msg[1] == 0) || (msg[1] == 1) { gate.program = msg[1] as u32; }
                                     },
                                 _ => return
@@ -192,6 +228,7 @@ impl Descriptor {
             control.foreach(f);
         }
         gate.write_output(offset, sample_count as usize - offset as usize);
+        */
     }            
 
 
