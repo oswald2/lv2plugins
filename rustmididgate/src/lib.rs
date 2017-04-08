@@ -164,6 +164,38 @@ impl Descriptor {
         // need this, will create a copy so we have no borrows on gate
         let midi_event = gate.midi_event;
 
+        
+        // version using iterator and a for loop:
+        unsafe {
+
+            let iterator = LV2AtomSequenceIterator::new(gate.control);
+
+            for x in iterator {
+                if (*x).body.mytype == midi_event {
+                    let msg = (*x).data();
+                    match lv2_midi_message_type(msg) {
+                        LV2MidiMessageType::LV2MidiMsgNoteOn => { 
+                                gate.n_active_notes += 1;
+                            },
+                        LV2MidiMessageType::LV2MidiMsgNoteOff => {
+                                gate.n_active_notes -= 1;
+                            },
+                        LV2MidiMessageType::LV2MidiMsgPgmChange => {
+                                if (msg[1] == 0) || (msg[1] == 1) { 
+                                    gate.program = msg[1] as u32; 
+                                }
+                            },
+                        _ => return
+                    }
+                }
+                let frames = (*x).time_as_frames();
+                gate.write_output(offset, frames as usize - offset as usize);
+                offset = frames as isize;
+            }
+        }
+        gate.write_output(offset, sample_count as usize - offset as usize);
+
+        /* implementation with Iterator
         unsafe {
 
             let ref mut control = *gate.control;
@@ -197,9 +229,11 @@ impl Descriptor {
             it.fold((), f);
         }
 
-        gate.write_output(offset, sample_count as usize - offset as usize);
+        gate.write_output(offset, sample_count as usize - offset as usize);*/
 
-        /*
+
+
+        /* Implementation with a foreach() method
         unsafe {
             let f = |it: *const LV2AtomEvent| { 
                         if (*it).body.mytype == gate.midi_event {
