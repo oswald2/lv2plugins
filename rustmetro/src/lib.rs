@@ -229,17 +229,26 @@ impl Metro {
         let uris = &self.uris;
 
 
-        let mut beat: *mut LV2Atom = 0 as *mut LV2Atom;
-        let mut bpm: *mut LV2Atom = 0 as *mut LV2Atom;
-        let mut speed: *mut LV2Atom = 0 as *mut LV2Atom;
+        let mut beat: *const LV2Atom = 0 as *const LV2Atom;
+        let mut bpm: *const LV2Atom = 0 as *const LV2Atom;
+        let mut speed: *const LV2Atom = 0 as *const LV2Atom;
 
-        let descr = [ObjectHelper{key: uris.time_bar_beat, atom: &mut beat},
-            ObjectHelper{key: uris.time_beats_per_minute, atom: &mut bpm},
-            ObjectHelper{key: uris.time_speed, atom: &mut speed}];
+        let descr = [LV2AtomObjectQuery{key: uris.time_bar_beat, value: &mut beat},
+            LV2AtomObjectQuery{key: uris.time_beats_per_minute, value: &mut bpm},
+            LV2AtomObjectQuery{key: uris.time_speed, value: &mut speed}];
 
         unsafe { 
             
-            lv2_atom_object_get(obj, &descr[..]);
+            let iter = LV2AtomObjectIterator::new(&*obj);
+            let it = LV2AtomObjectIteratorQuery::query(&iter, &descr);
+
+            for x in it {
+                if !bpm.is_null() && (*bpm).mytype == uris.atom_float {
+                    self.bpm = (*(bpm as *const LV2AtomFloat)).body as f64;
+                }
+            }
+
+            /*lv2_atom_object_get(obj, &descr[..]);
 
             if !bpm.is_null() && (*bpm).mytype == uris.atom_float {
                 self.bpm = (*(bpm as *const LV2AtomFloat)).body as f64;
@@ -262,7 +271,7 @@ impl Metro {
                     self.state = State::StateOff;
                 }
 
-            }
+            }*/
         }
     }
 }
